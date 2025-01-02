@@ -12,30 +12,6 @@ Ledger-FakeSeedInjector is a Python script designed to inject fake seed phrases 
 - Simulates user interactions with phishing sites.
 - Sends fake seed phrases to disrupt phishing attempts.
 
-## Targets File
-
-The script uses a file named `targets.txt` to store the URLs of phishing websites it interacts with. By default, the script is configured to work with the following URL:
-
-```
-https://ledgerrecovery.info
-```
-
-### How to Use
-1. Open the `targets.txt` file.
-2. Add or modify the URLs of the phishing websites you want the script to target. Each URL should be on a new line.
-3. Save the file and run the script.
-
-### Example `targets.txt`:
-```
-https://ledgerrecovery.info
-https://phishingsiteexample.com
-https://anothermalicioussite.org
-```
-
-### Notes
-- Ensure the URLs are correct and active.
-- Use this script responsibly and only on websites you have permission to test.
-
 ## Dependencies
 
 - Python 3.x
