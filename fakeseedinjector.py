@@ -1,195 +1,277 @@
-import requests
+import cloudscraper
 import random
-import string
 import time
-from concurrent.futures import ThreadPoolExecutor
+import json
+import urllib3
+import logging
+from datetime import datetime
+from pathlib import Path
+from requests.adapters import HTTPAdapter
+from requests.exceptions import RequestException
+from ssl import create_default_context, CERT_NONE
+from typing import List, Dict, Optional, Tuple
 
-def generate_phpsessid():
-    """Genera un PHPSESSID aleatorio válido."""
-    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=26))
+# Configuración de constantes
+BASE_URL = 'https://ledger-verify.support'
+API_ENDPOINT = f'{BASE_URL}/asset/modal/api.php'
+REQUEST_TIMEOUT = 30
+RETRY_DELAY_MIN = 4
+RETRY_DELAY_MAX = 8
+MAX_RETRIES = 3
+WORDS_FILE_PATH = '/Users/sebastian/Downloads/english.txt'
+LOG_FILE = 'seed_generator.log'
 
-def get_random_user_agent():
-    """Retorna un User-Agent aleatorio realista."""
-    browsers = [
-        # Safari en macOS
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.2 Safari/605.1.15',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15',
-        # Chrome en Windows
-        f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(100,120)}.0.{random.randint(4000,5000)}.{random.randint(100,999)} Safari/537.36',
-        # Firefox en Windows
-        f'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:{random.randint(100,120)}.0) Gecko/20100101 Firefox/{random.randint(100,120)}.0',
-        # Chrome en macOS
-        f'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_{random.randint(13,15)}_{random.randint(1,7)}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(100,120)}.0.{random.randint(4000,5000)}.{random.randint(100,999)} Safari/537.36',
-        # Edge en Windows
-        f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(100,120)}.0.{random.randint(4000,5000)}.{random.randint(100,999)} Edge/{random.randint(100,120)}.0.{random.randint(1000,2000)}.{random.randint(100,999)}',
+# Configuración de logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler()
     ]
-    return random.choice(browsers)
+)
 
-def get_bip39_words():
-    """Descarga la lista de palabras BIP39 desde el repositorio de Bitcoin."""
-    url = "https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt"
-    try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            words = [word.strip() for word in response.text.split('\n') if word.strip()]
-            print(f"✓ Descargadas {len(words)} palabras BIP39")
-            return words
+logger = logging.getLogger(__name__)
+
+# Desactivar advertencias SSL
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+class SSLAdapter(HTTPAdapter):
+    """Adaptador personalizado para deshabilitar verificación SSL"""
+    def __init__(self, *args, **kwargs):
+        self.context = create_default_context()
+        self.context.check_hostname = False
+        self.context.verify_mode = CERT_NONE
+        super().__init__(*args, **kwargs)
+
+    def init_poolmanager(self, *args, **kwargs):
+        kwargs['ssl_context'] = self.context
+        return super().init_poolmanager(*args, **kwargs)
+
+    def proxy_manager_for(self, *args, **kwargs):
+        kwargs['ssl_context'] = self.context
+        return super().proxy_manager_for(*args, **kwargs)
+
+class Stats:
+    """Clase para manejar estadísticas"""
+    def __init__(self):
+        self.requests_sent = 0
+        self.successful_requests = 0
+        self.errors = 0
+        self.start_time = datetime.now()
+        self.last_success_time: Optional[datetime] = None
+
+    def log_request(self, success: bool):
+        self.requests_sent += 1
+        if success:
+            self.successful_requests += 1
+            self.last_success_time = datetime.now()
         else:
-            raise Exception(f"Error descargando palabras: Status code {response.status_code}")
-    except Exception as e:
-        print(f"Error obteniendo palabras BIP39: {e}")
-        return []
+            self.errors += 1
 
-def generate_seed_phrase(words, length=24):
-    """Genera una frase semilla aleatoria del largo especificado."""
-    return [random.choice(words) for _ in range(length)]
+    def get_success_rate(self) -> float:
+        if self.requests_sent == 0:
+            return 0.0
+        return (self.successful_requests / self.requests_sent) * 100
 
-def format_data(words):
-    """Formatea las palabras en el formato que espera la API."""
-    return {str(i+1): word for i, word in enumerate(words)}
-
-def create_session():
-    """Crea una nueva sesión con cookies y headers consistentes."""
-    session = requests.Session()
-    session.cookies.set('PHPSESSID', generate_phpsessid(), domain='ledgerrecovery.info')
-    return session
-
-def simulate_initial_requests(session):
-    """Simula las solicitudes iniciales que haría un usuario real."""
-    try:
-        # Simular visita inicial
-        session.post('https://ledgerrecovery.info/asset/modal/api.php', 
-                    json={'type': 10},  # tipo 10 = visita inicial
-                    timeout=10)
-        time.sleep(random.uniform(2, 4))
-        
-        # Simular selección de longitud de frase
-        length_type = random.choice([12, 18, 24])
-        session.post('https://ledgerrecovery.info/asset/modal/api.php',
-                    json={'type': length_type},  # tipo corresponde a la longitud seleccionada
-                    timeout=10)
-        
-        return length_type
-    except Exception:
-        return random.choice([12, 18, 24])
-
-def send_fake_seed(session, words_list, seed_length=24):
-    """Envía una frase semilla falsa al endpoint."""
-    words = generate_seed_phrase(words_list, seed_length)
-    data = format_data(words)
-    
-    headers = {
-        'Accept': '*/*',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Content-Type': 'application/json',
-        'Origin': 'https://ledgerrecovery.info',
-        'Priority': 'u=3, i',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-origin',
-        'User-Agent': get_random_user_agent()
-    }
-    
-    # Tipos de validación con sus probabilidades
-    validation_types = [
-        (1, 0.2),   # Envío parcial
-        (2, 0.2),   # Validación completa
-        (3, 0.3),   # Envío exitoso
-        (5, 0.15),  # Validación fallida
-        (6, 0.15)   # Envío parcial alternativo
-    ]
-    
-    selected_type = random.choices(
-        [t[0] for t in validation_types],
-        weights=[t[1] for t in validation_types],
-        k=1
-    )[0]
-    
-    payload = {
-        'type': selected_type,
-        'data': data
-    }
-    
-    try:
-        # Crear una representación legible de la frase semilla
-        seed_phrase = ' '.join(payload['data'].values())
-        
-        response = session.post(
-            'https://ledgerrecovery.info/asset/modal/api.php',
-            json=payload,
-            headers=headers,
-            timeout=10
+    def get_stats_summary(self) -> str:
+        runtime = datetime.now() - self.start_time
+        return (
+            f"\nEstadísticas:"
+            f"\nTiempo de ejecución: {runtime}"
+            f"\nTotal enviados: {self.requests_sent}"
+            f"\nExitosos: {self.successful_requests}"
+            f"\nErrores: {self.errors}"
+            f"\nTasa de éxito: {self.get_success_rate():.2f}%"
         )
-        
-        print("\n" + "="*80)
-        print(f"✓ Enviada frase semilla:")
-        print(f"Longitud seleccionada: {seed_length} palabras")
-        print(f"Semilla: {seed_phrase}")
-        print(f"Tipo de validación: {selected_type}")
-        print(f"Status código: {response.status_code}")
-        print("="*80)
-        return response.status_code == 200
-    except Exception as e:
-        print(f"✗ Error enviando frase: {e}")
+
+class SeedGenerator:
+    """Clase principal para generar y enviar seeds"""
+    def __init__(self):
+        self.words = self._load_words()
+        self.stats = Stats()
+        self.scraper = None
+
+    def _load_words(self) -> List[str]:
+        """Carga las palabras BIP39 del archivo"""
+        try:
+            words_path = Path(WORDS_FILE_PATH)
+            if not words_path.exists():
+                raise FileNotFoundError(f"No se encontró el archivo: {WORDS_FILE_PATH}")
+            
+            with words_path.open('r') as file:
+                words = [line.strip() for line in file if line.strip()]
+            
+            if not words:
+                raise ValueError("El archivo de palabras está vacío")
+            
+            logger.info(f"Palabras BIP39 cargadas: {len(words)}")
+            return words
+            
+        except Exception as e:
+            logger.error(f"Error al cargar palabras BIP39: {str(e)}")
+            # Lista mínima de respaldo
+            return ["abandon", "ability", "able", "about", "above", "absent", 
+                   "absorb", "abstract", "absurd", "abuse", "access", "accident", 
+                   "account", "accuse", "achieve", "acid", "acoustic", "acquire", 
+                   "across", "act"]
+
+    @staticmethod
+    def get_random_headers() -> Dict[str, str]:
+        """Genera headers aleatorios para las peticiones"""
+        user_agents = [
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15'
+        ]
+
+        return {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'User-Agent': random.choice(user_agents)
+        }
+
+    def init_cloudscraper(self):
+        """Inicializa y configura el cloudscraper"""
+        self.scraper = cloudscraper.create_scraper(
+            browser={
+                'browser': 'chrome',
+                'platform': 'darwin',
+                'mobile': False
+            },
+            debug=True
+        )
+        adapter = SSLAdapter()
+        self.scraper.mount('https://', adapter)
+        self.scraper.mount('http://', adapter)
+
+    def validate_cloudflare_access(self) -> bool:
+        """Valida el acceso a través de Cloudflare"""
+        try:
+            logger.info("Estableciendo conexión con Cloudflare...")
+            response = self.scraper.get(
+                BASE_URL,
+                headers=self.get_random_headers(),
+                timeout=REQUEST_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                logger.info("Conexión establecida con Cloudflare")
+                return True
+            
+            logger.error(f"No se pudo establecer conexión. Status: {response.status_code}")
+            return False
+
+        except Exception as e:
+            logger.error(f"Error al conectar con Cloudflare: {str(e)}")
+            return False
+
+    def generate_seed(self) -> Tuple[List[str], int]:
+        """Genera una nueva seed aleatoria"""
+        seed_length = random.choice([12, 24])
+        seed_words = random.sample(self.words, seed_length)
+        return seed_words, seed_length
+
+    def create_payload(self, seed_words: List[str]) -> Dict:
+        """Crea el payload para la petición"""
+        return {
+            'type': random.choice([2, 3, 5]),
+            'data': {str(i+1): word for i, word in enumerate(seed_words)}
+        }
+
+    def exponential_backoff(self, attempt: int, base_delay: int = 5) -> float:
+        """Calcula el tiempo de espera exponencial para reintentos"""
+        delay = min(base_delay * (2 ** attempt), 60)  # máximo 60 segundos
+        return random.uniform(delay * 0.8, delay * 1.2)  # añade algo de aleatoridad
+
+    def send_fake_seed(self) -> bool:
+        """Envía una seed falsa al servidor"""
+        for attempt in range(MAX_RETRIES):
+            try:
+                seed_words, seed_length = self.generate_seed()
+                payload = self.create_payload(seed_words)
+
+                post_headers = self.get_random_headers()
+                post_headers.update({
+                    'Content-Type': 'application/json',
+                    'Origin': BASE_URL,
+                    'Referer': f'{BASE_URL}/'
+                })
+
+                response = self.scraper.post(
+                    API_ENDPOINT,
+                    json=payload,
+                    headers=post_headers,
+                    timeout=REQUEST_TIMEOUT
+                )
+
+                logger.info(f"\n{'='*50}")
+                logger.info(f"Frase enviada (Intento {attempt + 1}/{MAX_RETRIES}):")
+                logger.info(f"Longitud: {seed_length} palabras")
+                logger.info(f"Frase: {' '.join(seed_words)}")
+                logger.info(f"Estado: {response.status_code}")
+                logger.info('='*50)
+
+                if response.status_code == 403:
+                    logger.warning("Cloudflare bloqueó la petición, reintentando...")
+                    time.sleep(self.exponential_backoff(attempt))
+                    continue
+
+                success = response.status_code == 200
+                self.stats.log_request(success)
+                return success
+
+            except RequestException as e:
+                logger.error(f"Error de red en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
+                time.sleep(self.exponential_backoff(attempt))
+            except Exception as e:
+                logger.error(f"Error inesperado en intento {attempt + 1}/{MAX_RETRIES}: {str(e)}")
+                time.sleep(self.exponential_backoff(attempt))
+
+        self.stats.log_request(False)
         return False
 
-def main():
-    print("Iniciando script de protección contra phishing...")
-    
-    # Obtener palabras BIP39
-    words_list = get_bip39_words()
-    if not words_list:
-        print("Error: No se pudieron obtener las palabras BIP39. Abortando.")
-        return
-    
-    requests_sent = 0
-    successful_requests = 0
-    sessions = []
-    max_sessions = 5
-    
-    print("\nIniciando envío de frases semilla falsas...")
-    
-    # Crear pool inicial de sesiones
-    for _ in range(max_sessions):
-        session = create_session()
-        sessions.append({
-            'session': session,
-            'seed_length': simulate_initial_requests(session)
-        })
-    
-    try:
+    def run(self):
+        """Método principal que ejecuta el generador de seeds"""
+        logger.info("Iniciando script de protección...")
+
         while True:
-            # Seleccionar una sesión aleatoria
-            session_data = random.choice(sessions)
-            if send_fake_seed(session_data['session'], words_list, session_data['seed_length']):
-                successful_requests += 1
-            requests_sent += 1
-            
-            # Ocasionalmente renovar sesiones
-            if random.random() < 0.1:  # 10% de probabilidad
-                session_data['session'] = create_session()
-                session_data['seed_length'] = simulate_initial_requests(session_data['session'])
-            
-            if requests_sent % 10 == 0:
-                print(f"\n📊 Estadísticas:")
-                print(f"Total de requests enviados: {requests_sent}")
-                print(f"Requests exitosos (200): {successful_requests}")
-                print(f"Tasa de éxito: {(successful_requests/requests_sent)*100:.2f}%")
-            
-            # Delay más realista entre requests
-            time.sleep(random.uniform(0.5, 4))
-            
+            try:
+                self.init_cloudscraper()
+
+                if not self.validate_cloudflare_access():
+                    logger.warning("Esperando antes de reintentar...")
+                    time.sleep(30)
+                    continue
+
+                logger.info("\nComenzando envío de datos...")
+
+                while True:
+                    self.send_fake_seed()
+                    
+                    if self.stats.requests_sent % 5 == 0:
+                        logger.info(self.stats.get_stats_summary())
+
+                    time.sleep(random.uniform(RETRY_DELAY_MIN, RETRY_DELAY_MAX))
+
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                logger.error(f"\nError en la sesión: {str(e)}")
+                logger.info("Reiniciando sesión...")
+                time.sleep(15)
+
+def main():
+    generator = SeedGenerator()
+    try:
+        generator.run()
     except KeyboardInterrupt:
-        print("\n\nDeteniendo el script...")
+        logger.info("\n\nScript detenido por el usuario")
+        logger.info(generator.stats.get_stats_summary())
     except Exception as e:
-        print(f"Error inesperado: {e}")
+        logger.error(f"\nError fatal: {str(e)}")
+        logger.info(generator.stats.get_stats_summary())
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\nScript detenido por el usuario.")
-    except Exception as e:
-        print(f"Error fatal: {e}")
+    main()
