@@ -5,69 +5,69 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 def generate_phpsessid():
-    """Generates a random valid PHPSESSID."""
+    """Genera un PHPSESSID aleatorio válido."""
     return ''.join(random.choices(string.ascii_lowercase + string.digits, k=26))
 
 def get_random_user_agent():
-    """Returns a random realistic User-Agent."""
+    """Retorna un User-Agent aleatorio realista."""
     browsers = [
-        # Safari on macOS
+        # Safari en macOS
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.2 Safari/605.1.15',
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15',
-        # Chrome on Windows
+        # Chrome en Windows
         f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(100,120)}.0.{random.randint(4000,5000)}.{random.randint(100,999)} Safari/537.36',
-        # Firefox on Windows
+        # Firefox en Windows
         f'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:{random.randint(100,120)}.0) Gecko/20100101 Firefox/{random.randint(100,120)}.0',
-        # Chrome on macOS
+        # Chrome en macOS
         f'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_{random.randint(13,15)}_{random.randint(1,7)}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(100,120)}.0.{random.randint(4000,5000)}.{random.randint(100,999)} Safari/537.36',
-        # Edge on Windows
+        # Edge en Windows
         f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(100,120)}.0.{random.randint(4000,5000)}.{random.randint(100,999)} Edge/{random.randint(100,120)}.0.{random.randint(1000,2000)}.{random.randint(100,999)}',
     ]
     return random.choice(browsers)
 
 def get_bip39_words():
-    """Downloads the BIP39 word list from the Bitcoin repository."""
+    """Descarga la lista de palabras BIP39 desde el repositorio de Bitcoin."""
     url = "https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt"
     try:
         response = requests.get(url)
         if response.status_code == 200:
             words = [word.strip() for word in response.text.split('\n') if word.strip()]
-            print(f"✓ Downloaded {len(words)} BIP39 words")
+            print(f"✓ Descargadas {len(words)} palabras BIP39")
             return words
         else:
-            raise Exception(f"Error downloading words: Status code {response.status_code}")
+            raise Exception(f"Error descargando palabras: Status code {response.status_code}")
     except Exception as e:
-        print(f"Error fetching BIP39 words: {e}")
+        print(f"Error obteniendo palabras BIP39: {e}")
         return []
 
 def generate_seed_phrase(words, length=24):
-    """Generates a random seed phrase of the specified length."""
+    """Genera una frase semilla aleatoria del largo especificado."""
     return [random.choice(words) for _ in range(length)]
 
 def format_data(words):
-    """Formats the words in the format expected by the API."""
+    """Formatea las palabras en el formato que espera la API."""
     return {str(i+1): word for i, word in enumerate(words)}
 
 def create_session():
-    """Creates a new session with consistent cookies and headers."""
+    """Crea una nueva sesión con cookies y headers consistentes."""
     session = requests.Session()
     session.cookies.set('PHPSESSID', generate_phpsessid(), domain='ledgerrecovery.info')
     return session
 
 def simulate_initial_requests(session):
-    """Simulates the initial requests a real user would make."""
+    """Simula las solicitudes iniciales que haría un usuario real."""
     try:
-        # Simulate initial visit
+        # Simular visita inicial
         session.post('https://ledgerrecovery.info/asset/modal/api.php', 
-                    json={'type': 10},  # type 10 = initial visit
+                    json={'type': 10},  # tipo 10 = visita inicial
                     timeout=10)
         time.sleep(random.uniform(2, 4))
         
-        # Simulate seed phrase length selection
+        # Simular selección de longitud de frase
         length_type = random.choice([12, 18, 24])
         session.post('https://ledgerrecovery.info/asset/modal/api.php',
-                    json={'type': length_type},  # type corresponds to the selected length
+                    json={'type': length_type},  # tipo corresponde a la longitud seleccionada
                     timeout=10)
         
         return length_type
@@ -75,7 +75,7 @@ def simulate_initial_requests(session):
         return random.choice([12, 18, 24])
 
 def send_fake_seed(session, words_list, seed_length=24):
-    """Sends a fake seed phrase to the endpoint."""
+    """Envía una frase semilla falsa al endpoint."""
     words = generate_seed_phrase(words_list, seed_length)
     data = format_data(words)
     
@@ -92,13 +92,13 @@ def send_fake_seed(session, words_list, seed_length=24):
         'User-Agent': get_random_user_agent()
     }
     
-    # Validation types with their probabilities
+    # Tipos de validación con sus probabilidades
     validation_types = [
-        (1, 0.2),   # Partial submission
-        (2, 0.2),   # Full validation
-        (3, 0.3),   # Successful submission
-        (5, 0.15),  # Failed validation
-        (6, 0.15)   # Alternative partial submission
+        (1, 0.2),   # Envío parcial
+        (2, 0.2),   # Validación completa
+        (3, 0.3),   # Envío exitoso
+        (5, 0.15),  # Validación fallida
+        (6, 0.15)   # Envío parcial alternativo
     ]
     
     selected_type = random.choices(
@@ -113,7 +113,7 @@ def send_fake_seed(session, words_list, seed_length=24):
     }
     
     try:
-        # Create a readable representation of the seed phrase
+        # Crear una representación legible de la frase semilla
         seed_phrase = ' '.join(payload['data'].values())
         
         response = session.post(
@@ -124,33 +124,34 @@ def send_fake_seed(session, words_list, seed_length=24):
         )
         
         print("\n" + "="*80)
-        print(f"✓ Sent seed phrase:")
-        print(f"Selected length: {seed_length} words")
-        print(f"Seed: {seed_phrase}")
-        print(f"Validation type: {selected_type}")
-        print(f"Status code: {response.status_code}")
+        print(f"✓ Enviada frase semilla:")
+        print(f"Longitud seleccionada: {seed_length} palabras")
+        print(f"Semilla: {seed_phrase}")
+        print(f"Tipo de validación: {selected_type}")
+        print(f"Status código: {response.status_code}")
         print("="*80)
-        return True
+        return response.status_code == 200
     except Exception as e:
-        print(f"✗ Error sending seed: {e}")
+        print(f"✗ Error enviando frase: {e}")
         return False
 
 def main():
-    print("Starting phishing protection script...")
+    print("Iniciando script de protección contra phishing...")
     
-    # Get BIP39 words
+    # Obtener palabras BIP39
     words_list = get_bip39_words()
     if not words_list:
-        print("Error: Could not fetch BIP39 words. Aborting.")
+        print("Error: No se pudieron obtener las palabras BIP39. Abortando.")
         return
     
     requests_sent = 0
+    successful_requests = 0
     sessions = []
     max_sessions = 5
     
-    print("\nStarting fake seed phrase submissions...")
+    print("\nIniciando envío de frases semilla falsas...")
     
-    # Create initial session pool
+    # Crear pool inicial de sesiones
     for _ in range(max_sessions):
         session = create_session()
         sessions.append({
@@ -160,31 +161,35 @@ def main():
     
     try:
         while True:
-            # Select a random session
+            # Seleccionar una sesión aleatoria
             session_data = random.choice(sessions)
-            send_fake_seed(session_data['session'], words_list, session_data['seed_length'])
+            if send_fake_seed(session_data['session'], words_list, session_data['seed_length']):
+                successful_requests += 1
             requests_sent += 1
             
-            # Occasionally renew sessions
-            if random.random() < 0.1:  # 10% probability
+            # Ocasionalmente renovar sesiones
+            if random.random() < 0.1:  # 10% de probabilidad
                 session_data['session'] = create_session()
                 session_data['seed_length'] = simulate_initial_requests(session_data['session'])
             
-            if requests_sent % 50 == 0:
-                print(f"\n📊 Statistics:\nRequests sent: {requests_sent}")
+            if requests_sent % 10 == 0:
+                print(f"\n📊 Estadísticas:")
+                print(f"Total de requests enviados: {requests_sent}")
+                print(f"Requests exitosos (200): {successful_requests}")
+                print(f"Tasa de éxito: {(successful_requests/requests_sent)*100:.2f}%")
             
-            # More realistic delay between requests
+            # Delay más realista entre requests
             time.sleep(random.uniform(0.5, 4))
             
     except KeyboardInterrupt:
-        print("\n\nStopping script...")
+        print("\n\nDeteniendo el script...")
     except Exception as e:
-        print(f"Unexpected error: {e}")
+        print(f"Error inesperado: {e}")
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\nScript stopped by user.")
+        print("\nScript detenido por el usuario.")
     except Exception as e:
-        print(f"Fatal error: {e}")
+        print(f"Error fatal: {e}")
